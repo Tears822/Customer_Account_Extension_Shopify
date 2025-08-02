@@ -1,0 +1,21 @@
+name = "customer-account-booking"
+type = "customer_accounts_ui_extension"
+
+[capabilities]
+api_access = true
+network_access = true
+
+[settings]
+type = "react"
+
+[[metafields]]
+namespace = "booking"
+key = "settings"
+
+[extension_points]
+target = "CustomerAccount::FullPage::RenderWithin"
+module = "./src/index.jsx"
+
+[extension_points]
+target = "CustomerAccount::Menu::RenderAfter"
+module = "./src/Menu.jsx" 
