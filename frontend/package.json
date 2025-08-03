@@ -6,13 +6,23 @@
   "scripts": {
     "dev": "shopify app dev",
     "build": "shopify app build",
-    "deploy": "shopify app deploy"
+    "deploy": "shopify app deploy",
+    "generate": "shopify app generate",
+    "config:link": "shopify app config link",
+    "config:use": "shopify app config use",
+    "start": "node server.js",
+    "build:prod": "npm run build && npm run start"
   },
   "dependencies": {
-    "@shopify/ui-extensions": "^1.0.0",
+    "@shopify/ui-extensions": "^2025.7.0",
+    "@shopify/ui-extensions-react": "^2025.7.0",
+    "@supabase/supabase-js": "^2.38.4",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "lucide-react": "^0.263.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "lucide-react": "^0.263.1"
+    "react-reconciler": "0.29.0"
   },
   "devDependencies": {
     "@shopify/cli": "^3.0.0",
@@ -26,8 +36,9 @@
     "customer-account",
     "extension",
     "booking",
-    "fitness"
+    "fitness",
+    "supabase"
   ],
   "author": "Your Name",
   "license": "MIT"
-} 
+}

@@ -1,0 +1,46 @@
+# Learn more about configuring your app at https://shopify.dev/apps/build/cli-for-apps/app-configuration
+
+name = "fitness-booking-app"
+client_id = "99c33903c17436e73e44fc671ff56931"
+application_url = "https://mailbroker.ddns.net"
+embedded = true
+handle = "fitness-booking"
+[access_scopes]
+# Minimal required scopes for booking system
+scopes = "read_customers,write_customers,read_orders,read_products"
+
+[auth]
+redirect_urls = [
+  "https://mailbroker.ddns.net/api/auth/callback",
+  "https://mailbroker.ddns.net/auth/callback"
+]
+
+[webhooks]
+api_version = "2024-01"
+
+# Only unprotected webhooks until approval for protected customer data
+[[webhooks.subscriptions]]
+topics = [
+  "products/create",
+  "products/update",
+  "products/delete"
+]
+uri = "https://apimailbroker.ddns.net"
+
+# Required compliance webhooks (these are not protected and must be included for all public apps)
+[[webhooks.subscriptions]]
+topics = []
+compliance_topics = [
+  "customers/redact",
+  "customers/data_request",
+  "shop/redact"
+]
+uri = "https://apimailbroker.ddns.net/webhooks"
+
+[pos]
+embedded = false
+
+[build]
+automatically_update_urls_on_dev = true
+include_config_on_deploy = true
+dev_store_url = "imaginedev.myshopify.com"

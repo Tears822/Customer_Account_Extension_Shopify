@@ -8,7 +8,8 @@ extend('CustomerAccount::Menu::RenderAfter', (root, { customer, i18n }) => {
     root,
     <Button
       onPress={() => {
-        // Navigate to the booking page
+        // Navigate to the booking page using Shopify's navigation
+        // The extension will be available at the configured path
         window.location.href = '/account#/booking';
       }}
     >

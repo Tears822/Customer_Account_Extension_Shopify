@@ -12,10 +12,14 @@ type = "react"
 namespace = "booking"
 key = "settings"
 
-[extension_points]
+[[extension_points]]
 target = "CustomerAccount::FullPage::RenderWithin"
 module = "./src/index.jsx"
 
-[extension_points]
+[[extension_points]]
 target = "CustomerAccount::Menu::RenderAfter"
-module = "./src/Menu.jsx" 
+module = "./src/Menu.jsx"
+
+[[extension_points]]
+target = "CustomerAccount::Page::RenderWithin"
+module = "./src/index.jsx" 

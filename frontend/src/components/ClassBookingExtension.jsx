@@ -8,7 +8,8 @@ import {
   Badge, 
   Modal,
   Divider,
-  Icon
+  Icon,
+  Select
 } from '@shopify/ui-extensions-react/customer-account';
 import { 
   Calendar, 
@@ -16,74 +17,55 @@ import {
   Users, 
   CreditCard, 
   AlertCircle, 
-  CheckCircle 
+  CheckCircle,
+  MapPin,
+  User,
+  Zap
 } from 'lucide-react';
-
-// API configuration
-const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3001/api';
+import ApiService from '../services/api';
 
 const ClassBookingExtension = ({ customer, i18n }) => {
   const [activeTab, setActiveTab] = useState('sessions');
   const [userPlans, setUserPlans] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [bookings, setBookings] = useState([]);
+  const [creditTransactions, setCreditTransactions] = useState([]);
+  const [classTypes, setClassTypes] = useState([]);
+  const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedSession, setSelectedSession] = useState(null);
   const [notification, setNotification] = useState(null);
   const [filterType, setFilterType] = useState('all');
-
-  // Use actual Shopify customer data
-  const currentUser = {
-    id: customer.id,
-    email: customer.email,
-    first_name: customer.firstName,
-    last_name: customer.lastName
-  };
-
-  // API helper function
-  const apiCall = async (endpoint, options = {}) => {
-    const defaultHeaders = {
-      'Content-Type': 'application/json',
-      'x-shopify-customer-id': customer.id
-    };
-
-    const config = {
-      headers: { ...defaultHeaders, ...options.headers },
-      ...options
-    };
-
-    try {
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'API request failed');
-      }
-
-      return data;
-    } catch (error) {
-      console.error('API Error:', error);
-      throw error;
-    }
-  };
+  const [selectedClassType, setSelectedClassType] = useState('all');
+  const [selectedRoom, setSelectedRoom] = useState('all');
+  const [apiService] = useState(new ApiService());
 
   useEffect(() => {
-    loadData();
+    initializeData();
   }, []);
 
-  const loadData = async () => {
+  const initializeData = async () => {
     setLoading(true);
     try {
-      // Load user plans, sessions, and bookings in parallel
-      const [plansResponse, sessionsResponse, bookingsResponse] = await Promise.all([
-        apiCall('/plans/user-plans'),
-        apiCall('/sessions/'),
-        apiCall('/bookings/')
+      // Initialize user and student data
+      await apiService.initialize(customer);
+      
+      // Load all data in parallel
+      const [plans, sessionsData, bookingsData, transactionsData, typesData, roomsData] = await Promise.all([
+        apiService.getUserPlans(),
+        apiService.getSessions(),
+        apiService.getBookings(),
+        apiService.getCreditTransactions(),
+        apiService.getClassTypes(),
+        apiService.getRooms()
       ]);
 
-      setUserPlans(plansResponse.data || []);
-      setSessions(sessionsResponse.data || []);
-      setBookings(bookingsResponse.data || []);
+      setUserPlans(plans);
+      setSessions(sessionsData);
+      setBookings(bookingsData);
+      setCreditTransactions(transactionsData);
+      setClassTypes(typesData);
+      setRooms(roomsData);
     } catch (error) {
       console.error('Error loading data:', error);
       showNotification('Error loading data. Please try again.', 'error');
@@ -97,394 +79,558 @@ const ClassBookingExtension = ({ customer, i18n }) => {
     setTimeout(() => setNotification(null), 4000);
   };
 
-  const bookSession = async (sessionId) => {
+  const bookSession = async (sessionId, studentPlanId) => {
     try {
-      const response = await apiCall('/bookings/', {
-        method: 'POST',
-        body: JSON.stringify({ session_id: sessionId })
-      });
-
-      showNotification('🎉 Session booked successfully! See you in class!');
+      await apiService.bookSession(sessionId, studentPlanId);
+      showNotification('Session booked successfully!');
+      
+      // Refresh data
+      const [plans, bookings, transactions] = await Promise.all([
+        apiService.getUserPlans(),
+        apiService.getBookings(),
+        apiService.getCreditTransactions()
+      ]);
+      setUserPlans(plans);
+      setBookings(bookings);
+      setCreditTransactions(transactions);
       setSelectedSession(null);
-      loadData(); // Refresh data to show updated credits and bookings
     } catch (error) {
       console.error('Error booking session:', error);
-      showNotification(error.message || 'Unable to book session. Please try again.', 'error');
+      showNotification(error.message || 'Error booking session', 'error');
     }
   };
 
   const cancelBooking = async (bookingId) => {
     try {
-      await apiCall(`/bookings/${bookingId}/cancel`, {
-        method: 'PATCH',
-        body: JSON.stringify({ reason: 'Cancelled by user' })
-      });
-
-      showNotification('Booking cancelled successfully. Credit refunded to your account.');
-      loadData(); // Refresh data to show updated credits and bookings
+      await apiService.cancelBooking(bookingId);
+      showNotification('Booking cancelled successfully! Credit refunded.');
+      
+      // Refresh data
+      const [plans, bookings, transactions] = await Promise.all([
+        apiService.getUserPlans(),
+        apiService.getBookings(),
+        apiService.getCreditTransactions()
+      ]);
+      setUserPlans(plans);
+      setBookings(bookings);
+      setCreditTransactions(transactions);
     } catch (error) {
       console.error('Error cancelling booking:', error);
-      showNotification(error.message || 'Unable to cancel booking. Please contact support.', 'error');
+      showNotification(error.message || 'Error cancelling booking', 'error');
     }
   };
 
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString('en-US', {
-      weekday: 'long',
-      month: 'long',
+      weekday: 'short',
+      month: 'short',
       day: 'numeric'
     });
   };
 
   const formatTime = (timeString) => {
     return new Date(`2000-01-01T${timeString}`).toLocaleTimeString('en-US', {
-      hour: '2-digit',
+      hour: 'numeric',
       minute: '2-digit',
       hour12: true
     });
   };
 
   const getIntensityBadge = (level) => {
-    const intensityColors = {
+    const colors = {
       1: 'success',
-      2: 'warning',
-      3: 'attention',
+      2: 'success',
+      3: 'warning',
       4: 'critical',
-      5: 'info'
+      5: 'critical'
     };
+    return <Badge tone={colors[level] || 'info'}>Level {level}</Badge>;
+  };
+
+  const getStatusBadge = (status) => {
+    const colors = {
+      active: 'success',
+      cancelled: 'subdued',
+      completed: 'info',
+      no_show: 'critical'
+    };
+    return <Badge tone={colors[status] || 'subdued'}>{status}</Badge>;
+  };
+
+  const getFilteredSessions = () => {
+    let filtered = sessions;
+
+    // Filter by date
+    if (filterType !== 'all') {
+      const today = new Date().toISOString().split('T')[0];
+      const now = new Date();
+      
+      filtered = filtered.filter(session => {
+        const sessionDate = session.session_date;
+        const sessionTime = session.session_time;
+        const sessionDateTime = new Date(`${sessionDate}T${sessionTime}`);
+        
+        switch (filterType) {
+          case 'today':
+            return sessionDate === today;
+          case 'upcoming':
+            return sessionDateTime > now;
+          case 'past':
+            return sessionDateTime < now;
+          default:
+            return true;
+        }
+      });
+    }
+
+    // Filter by class type
+    if (selectedClassType !== 'all') {
+      filtered = filtered.filter(session => 
+        session.classes.class_types.id === selectedClassType
+      );
+    }
+
+    // Filter by room
+    if (selectedRoom !== 'all') {
+      filtered = filtered.filter(session => 
+        session.classes.rooms?.id === selectedRoom
+      );
+    }
+
+    return filtered;
+  };
+
+  const getFilteredBookings = () => {
+    if (filterType === 'all') return bookings;
     
-    return (
-      <Badge tone={intensityColors[level] || 'subdued'}>
-        {'🔥'.repeat(level)} Level {level}
-      </Badge>
-    );
-  };
-
-  const canBookSession = (sessionDate, sessionTime, bookingCutoffMinutes = 5) => {
-    const sessionDateTime = new Date(`${sessionDate}T${sessionTime}`);
+    const today = new Date().toISOString().split('T')[0];
     const now = new Date();
-    const cutoffTime = new Date(sessionDateTime.getTime() - (bookingCutoffMinutes * 60 * 1000));
-    return now < cutoffTime;
+    
+    return bookings.filter(booking => {
+      const sessionDate = booking.sessions.session_date;
+      const sessionTime = booking.sessions.session_time;
+      const sessionDateTime = new Date(`${sessionDate}T${sessionTime}`);
+      
+      switch (filterType) {
+        case 'today':
+          return sessionDate === today;
+        case 'upcoming':
+          return sessionDateTime > now;
+        case 'past':
+          return sessionDateTime < now;
+        default:
+          return true;
+      }
+    });
   };
 
-  const canCancelBooking = (sessionDate, sessionTime, cancellationCutoffHours = 2) => {
-    const sessionDateTime = new Date(`${sessionDate}T${sessionTime}`);
-    const cancellationDeadline = new Date(sessionDateTime.getTime() - (cancellationCutoffHours * 60 * 60 * 1000));
-    return new Date() < cancellationDeadline;
-  };
+  const renderSessionsTab = () => {
+    const filteredSessions = getFilteredSessions();
+    
+    if (loading) {
+      return (
+        <BlockStack gap="loose">
+          <Text>Loading sessions...</Text>
+        </BlockStack>
+      );
+    }
 
-  const filteredSessions = sessions.filter(session => {
-    if (filterType === 'all') return true;
-    return session.class?.class_type?.category === filterType;
-  });
+    if (filteredSessions.length === 0) {
+      return (
+        <BlockStack gap="loose">
+          <Text>No sessions available for the selected filters.</Text>
+        </BlockStack>
+      );
+    }
 
-  const totalCredits = userPlans.reduce((sum, plan) => 
-    plan.is_unlimited ? 999 : sum + plan.remaining_credits, 0);
-
-  if (loading) {
     return (
-      <BlockStack gap="loose" alignment="center">
-        <Text>Loading your fitness journey...</Text>
+      <BlockStack gap="loose">
+        {filteredSessions.map(session => (
+          <Card key={session.id}>
+            <BlockStack gap="tight">
+              <InlineStack align="space-between">
+                <Text variant="headingMd">{session.classes.name}</Text>
+                {getIntensityBadge(session.classes.class_types.intensity_level)}
+              </InlineStack>
+              
+              <Text tone="subdued">{session.classes.description}</Text>
+              
+              <InlineStack gap="tight">
+                <Icon source={Calendar} />
+                <Text>{formatDate(session.session_date)}</Text>
+              </InlineStack>
+              
+              <InlineStack gap="tight">
+                <Icon source={Clock} />
+                <Text>{formatTime(session.session_time)} - {formatTime(new Date(`2000-01-01T${session.session_time}`).getTime() + session.duration_minutes * 60000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}</Text>
+              </InlineStack>
+              
+              <InlineStack gap="tight">
+                <Icon source={User} />
+                <Text>{session.instructors.users.first_name} {session.instructors.users.last_name}</Text>
+              </InlineStack>
+              
+              <InlineStack gap="tight">
+                <Icon source={MapPin} />
+                <Text>{session.classes.rooms?.name || 'TBD'}</Text>
+              </InlineStack>
+              
+              <InlineStack gap="tight">
+                <Icon source={Users} />
+                <Text>{session.spots_left} spots left</Text>
+              </InlineStack>
+              
+              {userPlans.length > 0 && session.spots_left > 0 && (
+                <Button
+                  onPress={() => setSelectedSession(session)}
+                  variant="primary"
+                >
+                  Book Session
+                </Button>
+              )}
+              
+              {session.spots_left === 0 && (
+                <Text tone="subdued">Session is full</Text>
+              )}
+            </BlockStack>
+          </Card>
+        ))}
       </BlockStack>
     );
-  }
+  };
+
+  const renderBookingsTab = () => {
+    const filteredBookings = getFilteredBookings();
+    
+    if (loading) {
+      return (
+        <BlockStack gap="loose">
+          <Text>Loading bookings...</Text>
+        </BlockStack>
+      );
+    }
+
+    if (filteredBookings.length === 0) {
+      return (
+        <BlockStack gap="loose">
+          <Text>No bookings found.</Text>
+        </BlockStack>
+      );
+    }
+
+    return (
+      <BlockStack gap="loose">
+        {filteredBookings.map(booking => (
+          <Card key={booking.id}>
+            <BlockStack gap="tight">
+              <InlineStack align="space-between">
+                <Text variant="headingMd">{booking.sessions.classes.name}</Text>
+                {getStatusBadge(booking.status)}
+              </InlineStack>
+              
+              <InlineStack gap="tight">
+                <Icon source={Calendar} />
+                <Text>{formatDate(booking.sessions.session_date)}</Text>
+              </InlineStack>
+              
+              <InlineStack gap="tight">
+                <Icon source={Clock} />
+                <Text>{formatTime(booking.sessions.session_time)}</Text>
+              </InlineStack>
+              
+              <InlineStack gap="tight">
+                <Icon source={User} />
+                <Text>{booking.sessions.instructors.users.first_name} {booking.sessions.instructors.users.last_name}</Text>
+              </InlineStack>
+              
+              <InlineStack gap="tight">
+                <Icon source={MapPin} />
+                <Text>{booking.sessions.classes.rooms?.name || 'TBD'}</Text>
+              </InlineStack>
+              
+              <InlineStack gap="tight">
+                <Icon source={CreditCard} />
+                <Text>Plan: {booking.student_plans.plans.name}</Text>
+              </InlineStack>
+              
+              {booking.status === 'active' && (
+                <Button
+                  onPress={() => cancelBooking(booking.id)}
+                  variant="secondary"
+                  tone="critical"
+                >
+                  Cancel Booking
+                </Button>
+              )}
+            </BlockStack>
+          </Card>
+        ))}
+      </BlockStack>
+    );
+  };
+
+  const renderPlansTab = () => {
+    if (loading) {
+      return (
+        <BlockStack gap="loose">
+          <Text>Loading plans...</Text>
+        </BlockStack>
+      );
+    }
+
+    if (userPlans.length === 0) {
+      return (
+        <BlockStack gap="loose">
+          <Text>No active plans found. Purchase a plan from our store to start booking sessions.</Text>
+        </BlockStack>
+      );
+    }
+
+    return (
+      <BlockStack gap="loose">
+        {userPlans.map(plan => (
+          <Card key={plan.id}>
+            <BlockStack gap="tight">
+              <Text variant="headingMd">{plan.plans.name}</Text>
+              <Text>{plan.plans.description}</Text>
+              
+              <InlineStack gap="tight">
+                <Icon source={CreditCard} />
+                <Text>
+                  {plan.is_unlimited ? 'Unlimited credits' : `${plan.remaining_credits} credits remaining`}
+                </Text>
+              </InlineStack>
+              
+              <Text>Valid until: {formatDate(plan.end_date)}</Text>
+              
+              <Text tone="subdued">Purchased: {formatDate(plan.plan_purchases.purchased_at)}</Text>
+              
+              <Badge tone={plan.status === 'active' ? 'success' : 'subdued'}>
+                {plan.status}
+              </Badge>
+            </BlockStack>
+          </Card>
+        ))}
+      </BlockStack>
+    );
+  };
+
+  const renderTransactionsTab = () => {
+    if (loading) {
+      return (
+        <BlockStack gap="loose">
+          <Text>Loading transactions...</Text>
+        </BlockStack>
+      );
+    }
+
+    if (creditTransactions.length === 0) {
+      return (
+        <BlockStack gap="loose">
+          <Text>No credit transactions found.</Text>
+        </BlockStack>
+      );
+    }
+
+    return (
+      <BlockStack gap="loose">
+        {creditTransactions.map(transaction => (
+          <Card key={transaction.id}>
+            <BlockStack gap="tight">
+              <InlineStack align="space-between">
+                <Text variant="headingMd">{transaction.description}</Text>
+                <Badge tone={transaction.transaction_type === 'debit' ? 'critical' : 'success'}>
+                  {transaction.transaction_type === 'debit' ? '-' : '+'}{transaction.amount}
+                </Badge>
+              </InlineStack>
+              
+              <Text tone="subdued">{transaction.reference_type}</Text>
+              
+              <Text>Balance: {transaction.balance_after} credits</Text>
+              
+              <Text tone="subdued">{formatDate(transaction.created_at)}</Text>
+            </BlockStack>
+          </Card>
+        ))}
+      </BlockStack>
+    );
+  };
 
   return (
     <BlockStack gap="loose">
+      {/* Notification */}
+      {notification && (
+        <Card>
+          <InlineStack gap="tight" align="center">
+            <Icon 
+              source={notification.type === 'error' ? AlertCircle : CheckCircle} 
+              tone={notification.type === 'error' ? 'critical' : 'success'}
+            />
+            <Text tone={notification.type === 'error' ? 'critical' : 'success'}>
+              {notification.message}
+            </Text>
+          </InlineStack>
+        </Card>
+      )}
+
       {/* Header */}
       <Card>
         <BlockStack gap="tight">
-          <Text variant="headingLg" as="h1">
-            Welcome Back, {currentUser.first_name}
-          </Text>
-          <Text tone="subdued">Ready to crush your fitness goals?</Text>
-          <InlineStack gap="loose">
-            <BlockStack gap="tight">
-              <Text variant="headingMd">{totalCredits === 999 ? '∞' : totalCredits}</Text>
-              <Text tone="subdued">Credits Available</Text>
-            </BlockStack>
-            <BlockStack gap="tight">
-              <Text variant="headingMd" tone="success">{bookings.length}</Text>
-              <Text tone="subdued">Active Bookings</Text>
-            </BlockStack>
-          </InlineStack>
+          <Text variant="headingLg">Fitness Class Booking</Text>
+          <Text>Welcome back, {customer.firstName}!</Text>
         </BlockStack>
       </Card>
 
-      {/* Credits Summary */}
+      {/* Filter Tabs */}
       <Card>
         <BlockStack gap="loose">
-          <InlineStack gap="tight" alignment="center">
-            <Icon source={CreditCard} />
-            <Text variant="headingMd">Your Memberships</Text>
+          <InlineStack gap="tight">
+            <Button
+              variant={filterType === 'all' ? 'primary' : 'secondary'}
+              onPress={() => setFilterType('all')}
+            >
+              All
+            </Button>
+            <Button
+              variant={filterType === 'today' ? 'primary' : 'secondary'}
+              onPress={() => setFilterType('today')}
+            >
+              Today
+            </Button>
+            <Button
+              variant={filterType === 'upcoming' ? 'primary' : 'secondary'}
+              onPress={() => setFilterType('upcoming')}
+            >
+              Upcoming
+            </Button>
+            <Button
+              variant={filterType === 'past' ? 'primary' : 'secondary'}
+              onPress={() => setFilterType('past')}
+            >
+              Past
+            </Button>
           </InlineStack>
-          
-          {userPlans.length === 0 ? (
-            <Card tone="subdued">
-              <Text>No active memberships. Purchase a class pack to start booking!</Text>
-            </Card>
-          ) : (
-            userPlans.map((plan) => (
-              <Card key={plan.id} tone="subdued">
-                <BlockStack gap="tight">
-                  <Text variant="headingSm">{plan.plan.name}</Text>
-                  <Text tone="subdued">{plan.plan.description}</Text>
-                  <InlineStack gap="loose" alignment="space-between">
-                    <BlockStack gap="tight">
-                      <InlineStack gap="tight" alignment="baseline">
-                        <Text variant="headingLg">
-                          {plan.is_unlimited ? '∞' : plan.remaining_credits}
-                        </Text>
-                        {!plan.is_unlimited && (
-                          <Text tone="subdued">/ {plan.plan.credits}</Text>
-                        )}
-                      </InlineStack>
-                      <Text tone="subdued">
-                        {plan.is_unlimited ? 'Unlimited' : 'Credits remaining'}
-                      </Text>
-                    </BlockStack>
-                    <Text tone="subdued">
-                      Expires {new Date(plan.end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                    </Text>
-                  </InlineStack>
-                </BlockStack>
-              </Card>
-            ))
-          )}
+
+          {/* Additional Filters */}
+          <InlineStack gap="tight">
+            <Select
+              label="Class Type"
+              value={selectedClassType}
+              onValueChange={setSelectedClassType}
+              options={[
+                { label: 'All Types', value: 'all' },
+                ...classTypes.map(type => ({ label: type.name, value: type.id }))
+              ]}
+            />
+            
+            <Select
+              label="Room"
+              value={selectedRoom}
+              onValueChange={setSelectedRoom}
+              options={[
+                { label: 'All Rooms', value: 'all' },
+                ...rooms.map(room => ({ label: room.name, value: room.id }))
+              ]}
+            />
+          </InlineStack>
         </BlockStack>
       </Card>
 
-      {/* Navigation Tabs */}
-      <InlineStack gap="tight">
-        <Button
-          pressed={activeTab === 'sessions'}
-          onPress={() => setActiveTab('sessions')}
-        >
-          Available Classes
-        </Button>
-        <Button
-          pressed={activeTab === 'bookings'}
-          onPress={() => setActiveTab('bookings')}
-        >
-          My Bookings
-        </Button>
-      </InlineStack>
-
-      {/* Available Sessions Tab */}
-      {activeTab === 'sessions' && (
+      {/* Main Content Tabs */}
+      <Card>
         <BlockStack gap="loose">
-          {/* Filters */}
           <InlineStack gap="tight">
-            {['all', 'yoga', 'cardio', 'strength', 'pilates', 'hiit'].map((type) => (
-              <Button
-                key={type}
-                pressed={filterType === type}
-                onPress={() => setFilterType(type)}
-              >
-                {type === 'all' ? 'All Classes' : type.charAt(0).toUpperCase() + type.slice(1)}
-              </Button>
-            ))}
+            <Button
+              variant={activeTab === 'sessions' ? 'primary' : 'secondary'}
+              onPress={() => setActiveTab('sessions')}
+            >
+              Available Sessions
+            </Button>
+            <Button
+              variant={activeTab === 'bookings' ? 'primary' : 'secondary'}
+              onPress={() => setActiveTab('bookings')}
+            >
+              My Bookings
+            </Button>
+            <Button
+              variant={activeTab === 'plans' ? 'primary' : 'secondary'}
+              onPress={() => setActiveTab('plans')}
+            >
+              My Plans
+            </Button>
+            <Button
+              variant={activeTab === 'transactions' ? 'primary' : 'secondary'}
+              onPress={() => setActiveTab('transactions')}
+            >
+              Credit History
+            </Button>
           </InlineStack>
 
-          {/* Sessions Grid */}
-          <BlockStack gap="loose">
-            {filteredSessions.length === 0 ? (
-              <Card>
-                <Text>No sessions available for the selected filters.</Text>
-              </Card>
-            ) : (
-              filteredSessions.map((session) => {
-                const canBook = canBookSession(session.session_date, session.session_time, session.booking_cutoff_minutes);
-                
-                return (
-                  <Card key={session.id}>
-                    <BlockStack gap="loose">
-                      <InlineStack gap="loose" alignment="space-between">
-                        <BlockStack gap="tight">
-                          <Text variant="headingMd">{session.class.name}</Text>
-                          <Text tone="subdued">{session.class.description}</Text>
-                        </BlockStack>
-                        {session.class.class_type && getIntensityBadge(session.class.class_type.intensity_level)}
-                      </InlineStack>
-                      
-                      <BlockStack gap="tight">
-                        <InlineStack gap="loose" alignment="space-between">
-                          <InlineStack gap="tight" alignment="center">
-                            <Icon source={Calendar} />
-                            <Text>{formatDate(session.session_date)}</Text>
-                          </InlineStack>
-                          <InlineStack gap="tight" alignment="center">
-                            <Icon source={Clock} />
-                            <Text>{formatTime(session.session_time)} ({session.duration_minutes}min)</Text>
-                          </InlineStack>
-                        </InlineStack>
-                        
-                        <InlineStack gap="loose" alignment="space-between">
-                          <InlineStack gap="tight" alignment="center">
-                            <Icon source={MapPin} />
-                            <Text>{session.class.room?.name || 'TBD'}</Text>
-                          </InlineStack>
-                          <InlineStack gap="tight" alignment="center">
-                            <Icon source={Users} />
-                            <Text>{session.spots_left} spots left</Text>
-                          </InlineStack>
-                        </InlineStack>
-                      </BlockStack>
+          <Divider />
 
-                      <Divider />
-
-                      <InlineStack gap="loose" alignment="space-between">
-                        <Text>
-                          {session.instructor?.user?.first_name} {session.instructor?.user?.last_name}
-                        </Text>
-                        
-                        {session.spots_left === 0 ? (
-                          <Button disabled>Class Full</Button>
-                        ) : !canBook ? (
-                          <Button disabled>Booking Closed</Button>
-                        ) : (
-                          <Button
-                            onPress={() => setSelectedSession(session)}
-                          >
-                            Book Class
-                          </Button>
-                        )}
-                      </InlineStack>
-                    </BlockStack>
-                  </Card>
-                );
-              })
-            )}
-          </BlockStack>
+          {activeTab === 'sessions' && renderSessionsTab()}
+          {activeTab === 'bookings' && renderBookingsTab()}
+          {activeTab === 'plans' && renderPlansTab()}
+          {activeTab === 'transactions' && renderTransactionsTab()}
         </BlockStack>
-      )}
+      </Card>
 
-      {/* My Bookings Tab */}
-      {activeTab === 'bookings' && (
-        <BlockStack gap="loose">
-          {bookings.length === 0 ? (
-            <Card>
-              <Text>No active bookings. Book your first class to get started!</Text>
-            </Card>
-          ) : (
-            bookings.map((booking) => {
-              const canCancel = canCancelBooking(
-                booking.session.session_date, 
-                booking.session.session_time, 
-                booking.session.cancellation_cutoff_hours
-              );
-              
-              return (
-                <Card key={booking.id}>
-                  <BlockStack gap="loose">
-                    <Text variant="headingMd">{booking.session.class.name}</Text>
-                    
-                    <BlockStack gap="tight">
-                      <InlineStack gap="loose" alignment="space-between">
-                        <InlineStack gap="tight" alignment="center">
-                          <Icon source={Calendar} />
-                          <Text>{formatDate(booking.session.session_date)}</Text>
-                        </InlineStack>
-                        <InlineStack gap="tight" alignment="center">
-                          <Icon source={Clock} />
-                          <Text>{formatTime(booking.session.session_time)} ({booking.session.duration_minutes}min)</Text>
-                        </InlineStack>
-                      </InlineStack>
-                      
-                      <InlineStack gap="loose" alignment="space-between">
-                        <InlineStack gap="tight" alignment="center">
-                          <Icon source={MapPin} />
-                          <Text>{booking.session.class.room?.name || 'TBD'}</Text>
-                        </InlineStack>
-                        <InlineStack gap="tight" alignment="center">
-                          <Text>
-                            {booking.session.instructor?.user?.first_name} {booking.session.instructor?.user?.last_name}
-                          </Text>
-                        </InlineStack>
-                      </InlineStack>
-                    </BlockStack>
-
-                    <InlineStack gap="loose" alignment="space-between">
-                      <Badge tone={booking.status === 'active' ? 'success' : 'subdued'}>
-                        {booking.status.charAt(0).toUpperCase() + booking.status.slice(1)}
-                      </Badge>
-                      
-                      {booking.status === 'active' && (
-                        canCancel ? (
-                          <Button
-                            tone="critical"
-                            onPress={() => cancelBooking(booking.id)}
-                          >
-                            Cancel
-                          </Button>
-                        ) : (
-                          <Button disabled>Cannot Cancel</Button>
-                        )
-                      )}
-                    </InlineStack>
-                  </BlockStack>
-                </Card>
-              );
-            })
-          )}
-        </BlockStack>
-      )}
-
-      {/* Booking Confirmation Modal */}
+      {/* Booking Modal */}
       {selectedSession && (
         <Modal
-          open={true}
+          open={!!selectedSession}
           onClose={() => setSelectedSession(null)}
-          title="Confirm Booking"
+          title="Book Session"
         >
           <BlockStack gap="loose">
-            <Text variant="headingMd">{selectedSession.class.name}</Text>
-            <Text tone="subdued">{selectedSession.class.description}</Text>
+            <Text variant="headingMd">{selectedSession.classes.name}</Text>
+            <Text>{selectedSession.classes.description}</Text>
             
-            <BlockStack gap="tight">
-              <InlineStack gap="loose" alignment="space-between">
-                <Text>Date</Text>
-                <Text>{formatDate(selectedSession.session_date)}</Text>
-              </InlineStack>
-              <InlineStack gap="loose" alignment="space-between">
-                <Text>Time</Text>
-                <Text>{formatTime(selectedSession.session_time)} ({selectedSession.duration_minutes}min)</Text>
-              </InlineStack>
-              <InlineStack gap="loose" alignment="space-between">
-                <Text>Available Spots</Text>
-                <Text>{selectedSession.spots_left} remaining</Text>
-              </InlineStack>
-              <InlineStack gap="loose" alignment="space-between">
-                <Text>Cost</Text>
-                <Text>1 Credit</Text>
-              </InlineStack>
-            </BlockStack>
-
-            <InlineStack gap="loose">
-              <Button
-                onPress={() => setSelectedSession(null)}
-              >
-                Cancel
-              </Button>
-              <Button
-                primary
-                onPress={() => bookSession(selectedSession.id)}
-              >
-                Confirm Booking
-              </Button>
+            <InlineStack gap="tight">
+              <Icon source={Calendar} />
+              <Text>{formatDate(selectedSession.session_date)}</Text>
             </InlineStack>
+            
+            <InlineStack gap="tight">
+              <Icon source={Clock} />
+              <Text>{formatTime(selectedSession.session_time)}</Text>
+            </InlineStack>
+
+            <InlineStack gap="tight">
+              <Icon source={User} />
+              <Text>{selectedSession.instructors.users.first_name} {selectedSession.instructors.users.last_name}</Text>
+            </InlineStack>
+
+            <InlineStack gap="tight">
+              <Icon source={MapPin} />
+              <Text>{selectedSession.classes.rooms?.name || 'TBD'}</Text>
+            </InlineStack>
+
+            <InlineStack gap="tight">
+              <Icon source={Users} />
+              <Text>{selectedSession.spots_left} spots available</Text>
+            </InlineStack>
+
+            {userPlans.length > 0 ? (
+              <BlockStack gap="tight">
+                <Text variant="headingSm">Select a plan:</Text>
+                {userPlans.map(plan => (
+                  <Button
+                    key={plan.id}
+                    onPress={() => bookSession(selectedSession.id, plan.id)}
+                    variant="primary"
+                    disabled={!plan.is_unlimited && plan.remaining_credits < 1}
+                  >
+                    {plan.plans.name} 
+                    {!plan.is_unlimited && ` (${plan.remaining_credits} credits)`}
+                  </Button>
+                ))}
+              </BlockStack>
+            ) : (
+              <Text>No active plans available. Please purchase a plan from our store.</Text>
+            )}
           </BlockStack>
         </Modal>
-      )}
-
-      {/* Notification */}
-      {notification && (
-        <Card tone={notification.type === 'error' ? 'critical' : 'success'}>
-          <InlineStack gap="tight" alignment="center">
-            <Icon source={notification.type === 'error' ? AlertCircle : CheckCircle} />
-            <Text>{notification.message}</Text>
-          </InlineStack>
-        </Card>
       )}
     </BlockStack>
   );
